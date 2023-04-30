@@ -1,4 +1,4 @@
-#include "db_reader.hpp"
+#include "db_reader.h"
 
 #include <bsoncxx/builder/basic/kvp.hpp>
 #include <cstdint>
@@ -14,7 +14,7 @@
 #include <mongocxx/uri.hpp>
 
 
-namespace db
+namespace radar
 {
 
 void DbReader::connect()
@@ -43,7 +43,8 @@ pcl::PointCloud<pcl::PointXYZ> DbReader::receive()
             auto x = raw_point[0].get_int32().value;
             auto y = raw_point[1].get_int32().value;
             auto z = raw_point[2].get_int32().value;
-            points.emplace_back(x, y, z);
+            if (filter(x, y, z))
+                points.emplace_back(x, y, z);
         }
     }
     catch (const std::exception &e)
@@ -60,5 +61,16 @@ bool DbReader::available()
         return iterator != cursor->end();
     else
         return false;
+}
+
+void DbReader::skip(size_t n)
+{
+    for (size_t i = 0; i < n; i++)
+        ++*iterator;
+}
+
+void DbReader::setFilter(std::function<bool(int, int, int)> f)
+{
+    filter = f;
 }
 }
