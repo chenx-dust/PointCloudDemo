@@ -10,5 +10,16 @@ include_directories(${PCL_INCLUDE_DIRS})
 link_directories(${PCL_LIBRARY_DIRS})
 add_definitions(${PCL_DEFINITIONS})
 
-add_executable(point_cloud_demo main.cpp)
+find_package(mongocxx REQUIRED)
+find_package(bsoncxx REQUIRED)
+include_directories(${LIBMONGOCXX_INCLUDE_DIR})
+include_directories(${LIBBSONCXX_INCLUDE_DIR})
+
+include_directories("./include")
+set(SRC_LIST    "./src/main.cpp"
+                "./src/db_reader.cpp" )
+
+add_executable(point_cloud_demo ${SRC_LIST})
 target_link_libraries(point_cloud_demo ${PCL_LIBRARIES})
+target_link_libraries(point_cloud_demo mongo::mongocxx_shared)
+target_link_libraries(point_cloud_demo mongo::bsoncxx_shared)
