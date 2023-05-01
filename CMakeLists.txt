@@ -19,6 +19,7 @@ find_package(spdlog REQUIRED)
 
 include_directories("./include")
 set(SRC_LIST    "./src/db_reader.cpp"
+                "./src/ground_rm.cpp"
                 "./src/main.cpp" )
 
 add_executable(point_cloud_demo ${SRC_LIST})
