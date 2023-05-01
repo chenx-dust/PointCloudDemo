@@ -1,6 +1,7 @@
 #include "db_reader.h"
 #include "ground_rm.h"
 #include "voxel_octree.h"
+#include "voxel_op.h"
 #include <iostream>
 #include <memory>
 #include <pcl/ModelCoefficients.h>
@@ -11,6 +12,7 @@
 #include <pcl/visualization/pcl_visualizer.h>
 #include <pcl/visualization/point_cloud_color_handlers.h>
 #include <utility>
+#include <vector>
 
 int main()
 {
@@ -19,18 +21,31 @@ int main()
 
     pcl::PointCloud<pcl::PointXYZ> all_points, buffer;
 
+    int v0 = 0, v1 = 0;
+    
     // 可视化相关配置
     pcl::visualization::PCLVisualizer::Ptr viewer(new pcl::visualization::PCLVisualizer("3D Viewer"));
-    viewer->setBackgroundColor(0, 0, 0);
-    viewer->addCoordinateSystem(500.0);
-    viewer->addPointCloud(all_points.makeShared(), "sample cloud");
-    viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 1, "sample cloud");
+    viewer->createViewPort(0.0, 0.0, 0.5, 1.0, v0);
+    viewer->setBackgroundColor(0, 0, 0, v0);
+    viewer->addCoordinateSystem(1000.0, "cs", v0);
+    viewer->addPointCloud(all_points.makeShared(), "sample cloud", v0);
+    viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 1, "sample cloud", v0);
     viewer->initCameraParameters();
-    viewer->setCameraPosition(17000, -1000, 40000, 17000, -1000, 0, 10, 0, 0, 0); //摄像机位置
+    viewer->setCameraPosition(17000, -1000, 40000, 17000, -1000, 0, 10, 0, 0, v0); //摄像机位置
 
-    viewer->addPointCloud(pcl::PointCloud<pcl::PointXYZ>().makeShared(), "voxel cloud");
-    viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 1, "voxel cloud");
-    
+    viewer->createViewPort(0.5, 0.0, 1.0, 1.0, v1);
+    viewer->addCoordinateSystem(1000.0, "cs", v0);
+    viewer->setCameraPosition(17000, -1000, 40000, 17000, -1000, 0, 10, 0, 0, v1);
+
+    viewer->addPointCloud(pcl::PointCloud<pcl::PointXYZRGB>().makeShared(), "voxel cloud", v1);
+    viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 1, "voxel cloud", v1);
+
+    viewer->addPointCloud(pcl::PointCloud<pcl::PointXYZ>().makeShared(), "voxel ground", v1);
+    viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 2, "voxel ground", v1);
+
+    viewer->addPointCloud(pcl::PointCloud<pcl::PointXYZ>().makeShared(), "diff ground", v0);
+    viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 1, "diff ground", v0);
+
     // 一些状态量
     bool is_paused = false;
     bool show_original = true;
@@ -63,34 +78,65 @@ int main()
             std::cout << "Show Original." << std::endl;
             show_original = !show_original;
             if (show_original)
-                viewer->addPointCloud(all_points.makeShared(), "sample cloud");
+                viewer->addPointCloud(all_points.makeShared(), "sample cloud", v0);
             else
-                viewer->removePointCloud("sample cloud");
+                viewer->removePointCloud("sample cloud", v0);
         }
     });
 
     // 点计数
-    int cnt = 0;
+    int cnt = 0, tot = 0;
     pcl::PointXYZ resolution(400, 200, 200);
     // radar::VoxelOctree<pcl::PointXYZ> last_voxel(resolution, {0, 0, 0});
     radar::GroundVoxel ground(resolution);
+    ground.set_is_contructing(true);
     while (reader.available())
     {
         if (!is_paused)
         {
             if (cnt >= 20000)
             {
-                auto voxel_pc = ground.get_corner_points();
+                ground.refresh();
+
+                if (tot > 200000)
+                {
+                    ground.set_is_contructing(false);
+                    std::cout << "Stop Constructing." << std::endl;
+                }
+                auto voxel_pc = ground.get_corner_points_with_rgb();
                 // radar::VoxelOctree<radar::VoxelNode<pcl::PointXYZ>, pcl::PointXYZ> voxel(resolution, {0, 0, 0});
                 // voxel.push_pointcloud(all_points);
                 // auto voxel_pc = voxel.get_corner_points();
                 viewer->updatePointCloud(
                     voxel_pc.makeShared(),
-                    pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ>(voxel_pc.makeShared(), 255, 255, 0),
+                    pcl::visualization::PointCloudColorHandlerRGBField<pcl::PointXYZRGB>(voxel_pc.makeShared()),
                     "voxel cloud");
-                std::cout << "Create Voxel." << std::endl;
+                auto ground_pc = ground.get_real_ground();
+                viewer->updatePointCloud(ground_pc.makeShared(),
+                                         pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ>(
+                                             ground_pc.makeShared(), 255, 255, 0),
+                                         "voxel ground");
+                // auto diff = radar::diff_with_ground(ground, all_points);
+                auto diff = ground.filter_ground(all_points);
+                viewer->updatePointCloud<pcl::PointXYZ>(diff.makeShared(),
+                                         pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ>(
+                                             ground_pc.makeShared(), 255, 0, 0),
+                                         "diff ground");
+
+                std::cout << "Create Voxel. At " << tot << std::endl;
                 buffer.clear();
                 // viewer->updatePointCloud(buffer.makeShared(), "sample cloud");
+                // ground.traverse([](radar::GroundNode &node) {
+                //     if (node.size == 0)
+                //         cout << "leaf with " << node.contained_points << endl;
+                // });
+                // ground.traverse_idx([](radar::GroundNode &node, const std::vector<size_t> index) {
+                //     // if (node.size != 0)
+                //     //     return;
+                //     for (auto i : index)
+                //         cout << i << " ";
+                //     cout << "size:"<< node.size << endl;
+                // });
                 cnt = 0;
                 is_paused = true;
             }
@@ -102,6 +148,7 @@ int main()
                 ground.update(points);
                 viewer->updatePointCloud(all_points.makeShared(), "sample cloud");
                 cnt += points.size();
+                tot += points.size();
             }
         }
         viewer->spinOnce(10);
